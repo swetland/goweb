@@ -6,7 +6,7 @@ import (
 )
 
 type Stuff struct {
-	ClientId string `client-id`
+	ClientId     string `client-id`
 	ClientSecret string `client-secret`
 }
 

@@ -6,11 +6,11 @@
 package misc
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"reflect"
-	"bufio"
-	"bytes"
 )
 
 type fieldMap map[string]reflect.Value
@@ -29,7 +29,7 @@ type Configuration struct {
 // The provided struct is not only the template for valid config
 // file syntax, but also will be filled in by the values in the
 // config file when Parse() is called
-// 
+//
 //  type Size struct {
 //      Width string `width`
 //      Height string `height`
@@ -45,9 +45,15 @@ func (cfg *Configuration) AddSection(name string, ifc interface{}) {
 	for i := 0; i < t.NumField(); i++ {
 		value := v.Field(i)
 		tag := string(t.Field(i).Tag)
-		if len(tag) == 0 { continue }
-		if !value.CanSet() { continue }
-		if value.Kind() != reflect.String { continue }
+		if len(tag) == 0 {
+			continue
+		}
+		if !value.CanSet() {
+			continue
+		}
+		if value.Kind() != reflect.String {
+			continue
+		}
 		fields[tag] = value
 	}
 
@@ -66,7 +72,7 @@ func (e ParseError) Error() string {
 	return fmt.Sprintf("%d: %s", e.Line, e.What)
 }
 
-var sepEQ = []byte{ '=' }
+var sepEQ = []byte{'='}
 
 // Parse attempts to parse a configuration file using the registered
 // sections and fields.  Referencing nonexistant sections or fields
@@ -74,7 +80,7 @@ var sepEQ = []byte{ '=' }
 //
 //  # comments like this
 //  [size]
-//  width = 17 
+//  width = 17
 //  height = 42
 //
 // Blank lines are ignored.  Whitespace surrounding the = and at the
@@ -99,7 +105,7 @@ func (cfg *Configuration) Parse(r io.Reader) error {
 
 		// [section] makes a new section active
 		if line[0] == '[' && line[n-1] == ']' {
-			sname = string(bytes.TrimSpace(line[1:n-1]))
+			sname = string(bytes.TrimSpace(line[1 : n-1]))
 			fields, ok = cfg.sections[sname]
 			if !ok {
 				return &ParseError{fmt.Sprintf(
@@ -131,5 +137,3 @@ func (cfg *Configuration) Parse(r io.Reader) error {
 	// succeeded... unless there was an io error
 	return s.Err()
 }
-
-
