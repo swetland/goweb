@@ -1,21 +1,42 @@
+// Copyright 2013 Brian Swetland <swetland@frotz.net>
+
+// Package misc provides some small utility items that don't yet
+// have a better home.
+//
 package misc
 
 import (
 	"fmt"
 	"io"
 	"reflect"
-	"strconv"
-	"text/scanner"
+	"bufio"
+	"bytes"
 )
 
 type fieldMap map[string]reflect.Value
 type sectionMap map[string]fieldMap
 
+// Configuration provides a mechanism for a number of structs (sections)
+// to be initialized from a simple config file.
 type Configuration struct {
 	sections sectionMap
 }
 
-func (p *Configuration) AddSection(name string, ifc interface{}) {
+// AddSection creates a new named section in the configuration file
+// which contains allowed fields named using the struct field tags
+// of the writeable string fields in the struct provided via ifc.
+//
+// The provided struct is not only the template for valid config
+// file syntax, but also will be filled in by the values in the
+// config file when Parse() is called
+// 
+//  type Size struct {
+//      Width string `width`
+//      Height string `height`
+//  }
+//  cfg.AddSection("size", &Size)
+//
+func (cfg *Configuration) AddSection(name string, ifc interface{}) {
 	var v = reflect.ValueOf(ifc).Elem()
 	var t = v.Type()
 
@@ -23,131 +44,92 @@ func (p *Configuration) AddSection(name string, ifc interface{}) {
 
 	for i := 0; i < t.NumField(); i++ {
 		value := v.Field(i)
-		if !value.CanSet() {
-			continue;
-		}
-		if value.Kind() != reflect.String {
-			continue;
-		}
-		fields[t.Field(i).Name] = value
+		tag := string(t.Field(i).Tag)
+		if len(tag) == 0 { continue }
+		if !value.CanSet() { continue }
+		if value.Kind() != reflect.String { continue }
+		fields[tag] = value
 	}
 
-	if p.sections == nil {
-		p.sections = make(sectionMap)
+	if cfg.sections == nil {
+		cfg.sections = make(sectionMap)
 	}
-	p.sections[name] = fields
+	cfg.sections[name] = fields
 }
 
 type ParseError struct {
-	why string
-	pos scanner.Position
+	What string
+	Line int
 }
 
 func (e ParseError) Error() string {
-	return fmt.Sprintf("%s: %s", e.pos, e.why)
+	return fmt.Sprintf("%d: %s", e.Line, e.What)
 }
 
-func prettyname(tok rune) string {
-	switch tok {
-	case scanner.EOF: return "End-of-File"
-	case scanner.Ident: return "Identifier"
-	case scanner.Int: return "Integer"
-	case scanner.Float: return "Float"
-	case scanner.Char: return "Char"
-	case scanner.String: return "String"
-	case scanner.RawString: return "RawString"
-	case scanner.Comment: return "Comment"
-	default: return fmt.Sprintf("'%c'", tok)
-	}
-}
+var sepEQ = []byte{ '=' }
 
-func match(s *scanner.Scanner, expected rune) error {
-	actual := s.Scan()
-	if actual != expected {
-		return ParseError{fmt.Sprintf("Expected %s, but found %s.",
-			prettyname(expected), prettyname(actual)), s.Position}
-	}
-	return nil
-}
+// Parse attempts to parse a configuration file using the registered
+// sections and fields.  Referencing nonexistant sections or fields
+// is an error
+//
+//  # comments like this
+//  [size]
+//  width = 17 
+//  height = 42
+//
+// Blank lines are ignored.  Whitespace surrounding the = and at the
+// start or end of lines is also ignored.
+//
+func (cfg *Configuration) Parse(r io.Reader) error {
+	var sname string
+	var fields fieldMap = nil
+	var ok bool
+	lineno := 0
+	s := bufio.NewScanner(r)
+	for s.Scan() {
+		lineno++
+		line := s.Bytes()
+		line = bytes.TrimSpace(line)
+		n := len(line)
 
-func (p *Configuration) parseLine(s *scanner.Scanner, sname string, fields fieldMap) error {
-	var err error
-	name := s.TokenText()
-	if err = match(s, '='); err != nil {
-		return err;
-	}
-	if err = match(s, scanner.String); err != nil {
-		return err
-	}
-	field, ok := fields[name]
-	if !ok {
-		return ParseError{
-			fmt.Sprintf("Section '%s' has no item named '%s'.\n",
-				sname, name), s.Position}
-	}
-	value, err := strconv.Unquote(s.TokenText())
-	if err != nil {
-		return ParseError{"Invalid String Constant",s.Position}
-	}
-	field.SetString(value)
-	return nil
-}
-
-func (p *Configuration) parseSection(s *scanner.Scanner) error {
-	name := s.TokenText()
-	fields, ok := p.sections[name]
-	if !ok {
-		return ParseError{
-			fmt.Sprintf("Invalid section '%s'.", name),
-			s.Position }
-	}
-	if err := match(s, '{'); err != nil {
-		return err
-	}
-	for {
-		tok := s.Scan();
-		if tok == '}' {
-			return nil
+		// ignore blank lines or comments
+		if n == 0 || line[0] == '#' {
+			continue
 		}
-		if tok == scanner.Ident {
-			if err := p.parseLine(s, name, fields); err != nil {
-				return err
+
+		// [section] makes a new section active
+		if line[0] == '[' && line[n-1] == ']' {
+			sname = string(bytes.TrimSpace(line[1:n-1]))
+			fields, ok = cfg.sections[sname]
+			if !ok {
+				return &ParseError{fmt.Sprintf(
+					"Unknown config section [%s]",
+					sname), lineno}
 			}
 			continue
 		}
-		return ParseError{
-			fmt.Sprintf("Expected Identifier or '}', but found %s.",
-				prettyname(tok)), s.Position}
-	}
-}
 
-func (p *Configuration) parseConfig(s *scanner.Scanner) error {
-	for {
-		tok := s.Scan();
-
-		if (tok == scanner.EOF) {
-			return nil
+		// other lines must be foo=bar style
+		parts := bytes.Split(line, sepEQ)
+		if len(parts) != 2 {
+			return &ParseError{"Invalid Assignment", lineno}
 		}
-
-		if (tok == scanner.Ident) {
-			if err := p.parseSection(s); err != nil {
-				return err
-			}
-			continue;
+		if fields == nil {
+			return &ParseError{"No section specified", lineno}
 		}
-
-		return ParseError{
-			fmt.Sprintf("Expected Identifier, but found %s.",
-				prettyname(tok)), s.Position}
+		name := string(bytes.TrimSpace(parts[0]))
+		value := string(bytes.TrimSpace(parts[1]))
+		v, ok := fields[name]
+		if !ok {
+			return &ParseError{fmt.Sprintf(
+				"Section [%s] has no variable '%s'",
+				sname, name), lineno}
+		}
+		v.SetString(value)
 	}
-}
 
-func (p *Configuration) Parse(r io.Reader) error {
-	var s scanner.Scanner
-	s.Init(r)
-	s.Mode = scanner.ScanIdents | scanner.ScanComments |
-		scanner.SkipComments | scanner.ScanStrings
-	return p.parseConfig(&s)
+	// succeeded... unless there was an io error
+	return s.Err()
 }
 
 
