@@ -15,8 +15,10 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"frotz/misc"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -24,10 +26,32 @@ import (
 	"os"
 	"server/google"
 	"server/session"
+	"strings"
 	"time"
 )
 
 var config_google_auth google.ClientConfig
+
+func lookupUserByAccountId(id string) string {
+	log.Printf("lookup '%s'\n", id)
+	for _, c := range id {
+		switch {
+		case c >= 'a' && c <= 'z':
+			break
+		case c >= '0' && c <= '9':
+			break
+		case c == '-':
+			break
+		default:
+			return "invalid"
+		}
+	}
+	data, err := ioutil.ReadFile(config.UserDir + id)
+	if err == nil {
+		return string(bytes.TrimSpace(data))
+	}
+	return "guest"
+}
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
@@ -41,8 +65,8 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fmt.Fprintf(w, "OOPS: %s\n", err)
 	} else {
-		uid := fmt.Sprintf("google-%s", user.Id)
-		// TODO: sanitize/validate sid?
+		id := fmt.Sprintf("google-%s", user.Id)
+		uid := lookupUserByAccountId(id)
 		sid, ok := session.Start(uid)
 		if ok {
 			cookie := http.Cookie{
@@ -108,14 +132,17 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 type ServerConfig struct {
 	Address string `address`
 	Socket  string `fcgi-socket`
+	BaseDir string `datastore`
+	DataDir string
+	UserDir string
 }
 
-var config_server ServerConfig
+var config ServerConfig
 
 func main() {
 	var cfg misc.Configuration
 	cfg.AddSection("google-auth", &config_google_auth)
-	cfg.AddSection("server", &config_server)
+	cfg.AddSection("server", &config)
 
 	if len(os.Args) != 2 {
 		log.Fatal("server: no configuration file specified")
@@ -134,8 +161,14 @@ func main() {
 		log.Fatal(err)
 	}
 
-	sock := config_server.Socket
-	addr := config_server.Address
+	if !strings.HasSuffix(config.BaseDir, "/") {
+		config.BaseDir += "/"
+	}
+	config.UserDir = config.BaseDir + "user/"
+	config.DataDir = config.BaseDir + "data/"
+
+	sock := config.Socket
+	addr := config.Address
 	if len(sock) == 0 && len(addr) == 0 {
 		log.Fatalf("server: %s: must select either server.address or server.socket", cfgfile)
 	}
