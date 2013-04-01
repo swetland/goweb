@@ -15,13 +15,13 @@
 package main
 
 import (
+	"frotz/misc"
 	"log"
 	"net"
 	"net/http"
 	"net/http/fcgi"
 	"os"
 	"server/google"
-	"frotz/misc"
 )
 
 var config_google_auth google.ClientConfig
@@ -32,7 +32,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 type ServerConfig struct {
 	Address string `address`
-	Socket string `fcgi-socket`
+	Socket  string `fcgi-socket`
 }
 
 var config_server ServerConfig
@@ -76,7 +76,7 @@ func main() {
 			log.Fatal(err)
 		}
 
-		err = fcgi.Serve(s, http.HandlerFunc(handler));
+		err = fcgi.Serve(s, http.HandlerFunc(handler))
 		if err != nil {
 			log.Fatal(err)
 		}

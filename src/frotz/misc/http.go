@@ -21,7 +21,7 @@ import (
 	"strings"
 )
 
-// Just dump all the context 
+// Just dump all the context
 //
 func DebugHttpHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
@@ -39,7 +39,7 @@ func DebugHttpHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "URL.Query():\n")
 	for k, v := range r.URL.Query() {
 		for _, v2 := range v {
-			fmt.Fprintf(w,"  %s: %s\n", k, v2)
+			fmt.Fprintf(w, "  %s: %s\n", k, v2)
 		}
 	}
 	fmt.Fprintf(w, "ContentLength: %d\n", r.ContentLength)
@@ -72,7 +72,7 @@ func DebugHttpHandler(w http.ResponseWriter, r *http.Request) {
 		} else {
 			fmt.Fprintf(w, "ERROR %v\n", err)
 		}
-	} else  if strings.HasPrefix(ctype, "application/x-www-form-urlencoded") {
+	} else if strings.HasPrefix(ctype, "application/x-www-form-urlencoded") {
 		r.ParseForm()
 		fmt.Fprint(w, "Form (urlencoded):\n")
 		for k, v := range r.Form {
@@ -82,4 +82,3 @@ func DebugHttpHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
-

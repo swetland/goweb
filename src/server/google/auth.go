@@ -15,8 +15,8 @@
 package google
 
 import (
-	"errors"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -24,26 +24,26 @@ import (
 )
 
 type Token struct {
-	AccessToken string `json:"access_token"`
-	TokenType string `json:"token_type"`
-	ExpiresIn float64 `json:"expires_in"`
-	IdToken string `json:"id_token"`
+	AccessToken string  `json:"access_token"`
+	TokenType   string  `json:"token_type"`
+	ExpiresIn   float64 `json:"expires_in"`
+	IdToken     string  `json:"id_token"`
 }
 
 type UserInfo struct {
-	Id string `json:"id"`
-	Email string `json:"email"`
-	VerifiedEmail bool `json:"verified_email"`
-	Hd string `json:"hd"`
+	Id            string `json:"id"`
+	Email         string `json:"email"`
+	VerifiedEmail bool   `json:"verified_email"`
+	Hd            string `json:"hd"`
 }
 
 var authtoken_url = "https://accounts.google.com/o/oauth2/token"
 var userinfo_url = "https://www.googleapis.com/oauth2/v1/userinfo?access_token="
 
 type ClientConfig struct {
-	ClientId string `client-id`
+	ClientId     string `client-id`
 	ClientSecret string `client-secret`
-	RedirectURI string `redirect-uri`
+	RedirectURI  string `redirect-uri`
 }
 
 func Authenticate(cfg ClientConfig, code string) (ui UserInfo, err error) {
