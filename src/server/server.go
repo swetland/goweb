@@ -53,7 +53,7 @@ func lookupUserByAccountId(id string) string {
 	return "guest"
 }
 
-func loginHandler(w http.ResponseWriter, r *http.Request) {
+func authHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 
 	code := r.URL.Query().Get("code")
@@ -129,12 +129,108 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// names must consist of [a-z0-9:-./]
+// '/' may not be followed by a '.' or '/'
+// The character preceeding the first character is assumed to
+// be a '/' for the purpose of this rule
+//
+// A-Z will be mapped to a-z
+// All other invalid characters will be mapped to '-'
+//
+func canonicalize(name string) (string, bool) {
+	var n = 0
+	var changed = false
+	var afterslash = true
+	var out = make([]byte, len(name))
+
+	for _, c := range name {
+		switch {
+		case c >= 'a' && c <= 'z':
+			fallthrough
+		case c >= '0' && c <= '9':
+			fallthrough
+		case c == '-':
+			fallthrough
+		case c == ':':
+			out[n] = byte(c)
+			n++
+			afterslash = false
+		case c == '/':
+			if afterslash {
+				out[n] = '-'
+				n++
+				afterslash = false
+				changed = true
+			} else {
+				out[n] = '/'
+				n++
+				afterslash = true
+			}
+		case c >= 'A' && c <= 'Z':
+			out[n] = byte(c) - 'A' + 'a'
+			n++
+			changed = true
+			afterslash = false
+		case c == '.':
+			if afterslash {
+				out[n] = '-'
+				n++
+				afterslash = false
+				changed = true
+			} else {
+				out[n] = '.'
+				n++
+			}
+		default:
+			out[n] = '-'
+			n++
+			changed = true
+			afterslash = false
+		}
+	}
+	if changed {
+		return string(out[:n]), true
+	} else {
+		return name, false
+	}
+}
+
+func pageHandler(w http.ResponseWriter, r *http.Request) {
+	pagename, redir := canonicalize(r.URL.Path[10:])
+	if redir {
+		http.Redirect(w, r, "/app/page/"+pagename, 302)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain")
+	fmt.Fprintf(w, "Nothing to see here...\n")
+}
+
+func fileHandler(w http.ResponseWriter, r *http.Request) {
+	pagename, redir := canonicalize(r.URL.Path[10:])
+	if redir {
+		http.Redirect(w, r, "/app/file/"+pagename, 302)
+		return
+	}
+
+	http.ServeFile(w, r, config.FileDir+pagename)
+}
+
+func loginHandler(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "https://accounts.google.com/o/oauth2/auth"+
+		"?scope=https://www.googleapis.com/auth/userinfo.email"+
+		"&client_id="+config_google_auth.ClientId+
+		"&redirect_uri="+config_google_auth.RedirectURI+
+		"&response_type=code", 302)
+}
+
 type ServerConfig struct {
 	Address string `address`
 	Socket  string `fcgi-socket`
 	BaseDir string `datastore`
 	DataDir string
 	UserDir string
+	FileDir string
 }
 
 var config ServerConfig
@@ -166,21 +262,27 @@ func main() {
 	}
 	config.UserDir = config.BaseDir + "user/"
 	config.DataDir = config.BaseDir + "data/"
+	config.FileDir = config.BaseDir + "file/"
 
 	sock := config.Socket
 	addr := config.Address
 	if len(sock) == 0 && len(addr) == 0 {
-		log.Fatalf("server: %s: must select either server.address or server.socket", cfgfile)
+		log.Fatalf("server: %s: must select either server.address"+
+			" or server.socket", cfgfile)
 	}
 	if len(sock) != 0 && len(addr) != 0 {
-		log.Fatalf("server: %s: cannot use both server.address and server.socket", cfgfile)
+		log.Fatalf("server: %s: cannot use both server.address"+
+			" and server.socket", cfgfile)
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/app/test", misc.DebugHttpHandler)
-	mux.HandleFunc("/app/@/auth", loginHandler)
-	mux.HandleFunc("/app/@/logout", logoutHandler)
-	mux.HandleFunc("/app/@/check", checkHandler)
+	mux.HandleFunc("/app/auth", authHandler)
+	mux.HandleFunc("/app/login", loginHandler)
+	mux.HandleFunc("/app/logout", logoutHandler)
+	mux.HandleFunc("/app/check", checkHandler)
+	mux.HandleFunc("/app/page/", pageHandler)
+	mux.HandleFunc("/app/file/", fileHandler)
 
 	if len(sock) != 0 {
 		os.Remove(sock)
