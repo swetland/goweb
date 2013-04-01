@@ -15,9 +15,9 @@
 package session
 
 import (
-	"fmt"
 	"crypto/sha1"
 	"encoding/hex"
+	"fmt"
 	"time"
 )
 
@@ -29,13 +29,13 @@ const (
 
 type SessionRequest struct {
 	Command int32
-	Data string
-	Reply chan<- SessionReply
+	Data    string
+	Reply   chan<- SessionReply
 }
 
 type SessionReply struct {
 	Data string
-	Ok bool
+	Ok   bool
 }
 
 var sessionSrvCh = make(chan SessionRequest, 64)
@@ -53,7 +53,7 @@ func sessionServer() {
 			for {
 				hash.Reset()
 				fmt.Fprint(hash, count, time.Now(), req.Data)
-				count++;
+				count++
 				sid = hex.EncodeToString(hash.Sum(nil))
 				_, exists := sessions[sid]
 				if !exists {
@@ -61,15 +61,15 @@ func sessionServer() {
 				}
 			}
 			sessions[sid] = req.Data
-			req.Reply <- SessionReply{ sid, true }
+			req.Reply <- SessionReply{sid, true}
 
 		case SESSION_LOOKUP:
 			uid, exists := sessions[req.Data]
-			req.Reply <- SessionReply{ uid, exists }
+			req.Reply <- SessionReply{uid, exists}
 
 		case SESSION_END:
 			delete(sessions, req.Data)
-			req.Reply <- SessionReply{ "", true }
+			req.Reply <- SessionReply{"", true}
 		}
 	}
 }
@@ -80,7 +80,7 @@ func init() {
 
 func sessionRpc(cmd int32, data string) (string, bool) {
 	c := make(chan SessionReply, 1)
-	sessionSrvCh <- SessionRequest{ cmd, data, c }
+	sessionSrvCh <- SessionRequest{cmd, data, c}
 	r := <-c
 	return r.Data, r.Ok
 }
