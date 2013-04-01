@@ -15,6 +15,7 @@
 package main
 
 import (
+	"fmt"
 	"frotz/misc"
 	"log"
 	"net"
@@ -22,12 +23,86 @@ import (
 	"net/http/fcgi"
 	"os"
 	"server/google"
+	"server/session"
+	"time"
 )
 
 var config_google_auth google.ClientConfig
 
-func handler(w http.ResponseWriter, r *http.Request) {
-	misc.DebugHttpHandler(w, r)
+func loginHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+
+	code := r.URL.Query().Get("code")
+	if len(code) < 1 {
+		return
+	}
+
+	user, err := google.Authenticate(config_google_auth, code)
+	if err != nil {
+		fmt.Fprintf(w, "OOPS: %s\n", err)
+	} else {
+		uid := fmt.Sprintf("google-%s", user.Id)
+		// TODO: sanitize/validate sid?
+		sid, ok := session.Start(uid)
+		if ok {
+			cookie := http.Cookie{
+				Path:     "/",
+				Name:     "SID",
+				Value:    sid,
+				Secure:   true,
+				HttpOnly: true,
+			}
+			http.SetCookie(w, &cookie)
+			fmt.Fprintf(w, "Welcome, user '%s', session '%s'\n", uid, sid)
+		}
+	}
+}
+
+func getCredentials(r *http.Request) (sid string, uid string, ok bool) {
+	cookie, err := r.Cookie("SID")
+	if err == nil {
+		sid = cookie.Value
+		uid, ok = session.Lookup(cookie.Value)
+	}
+	return
+}
+
+func logoutHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+
+	sid, uid, ok := getCredentials(r)
+
+	cookie := http.Cookie{
+		Path:     "/",
+		Name:     "SID",
+		Secure:   true,
+		HttpOnly: true,
+		Expires:  time.Unix(42, 0),
+	}
+	http.SetCookie(w, &cookie)
+
+	if ok {
+		session.End(sid)
+		fmt.Fprintf(w, "Goodbye, user '%s'\n", uid)
+	} else {
+		fmt.Fprintf(w, "Do I know you?")
+	}
+}
+
+func checkHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+
+	sid, uid, ok := getCredentials(r)
+
+	if ok {
+		fmt.Fprintf(w, "Your SID is %s\nYour UID is %s\n", sid, uid)
+	} else {
+		if len(sid) != 0 {
+			fmt.Fprintf(w, "Your SID (%s) is invalid or expired\n", sid)
+		} else {
+			fmt.Fprintf(w, "You have no SID\n")
+		}
+	}
 }
 
 type ServerConfig struct {
@@ -68,6 +143,12 @@ func main() {
 		log.Fatalf("server: %s: cannot use both server.address and server.socket", cfgfile)
 	}
 
+	mux := http.NewServeMux()
+	mux.HandleFunc("/app/test", misc.DebugHttpHandler)
+	mux.HandleFunc("/app/@/auth", loginHandler)
+	mux.HandleFunc("/app/@/logout", logoutHandler)
+	mux.HandleFunc("/app/@/check", checkHandler)
+
 	if len(sock) != 0 {
 		os.Remove(sock)
 		s, err := net.Listen("unix", sock)
@@ -76,12 +157,11 @@ func main() {
 			log.Fatal(err)
 		}
 
-		err = fcgi.Serve(s, http.HandlerFunc(handler))
+		err = fcgi.Serve(s, mux)
 		if err != nil {
 			log.Fatal(err)
 		}
 	} else {
-		http.HandleFunc("/", handler)
-		http.ListenAndServe(addr, nil)
+		http.ListenAndServe(addr, mux)
 	}
 }
