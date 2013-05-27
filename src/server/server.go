@@ -32,6 +32,18 @@ import (
 
 var config_google_auth google.ClientConfig
 
+type ServerConfig struct {
+	Address  string `address`
+	Socket   string `fcgi-socket`
+	BaseDir  string `datastore`
+	BasePath string `basepath`
+	DataDir  string
+	UserDir  string
+	FileDir  string
+}
+
+var config ServerConfig
+
 func lookupUserByAccountId(id string) string {
 	log.Printf("lookup '%s'\n", id)
 	for _, c := range id {
@@ -195,10 +207,15 @@ func canonicalize(name string) (string, bool) {
 	}
 }
 
-func pageHandler(w http.ResponseWriter, r *http.Request) {
-	pagename, redir := canonicalize(r.URL.Path[10:])
+func errorHandler(w http.ResponseWriter, r *http.Request, msg string) {
+	w.Header().Set("Content-Type", "text/plain")
+	fmt.Fprintf(w, "ERROR: %s", msg)
+}
+
+func pageHandler(w http.ResponseWriter, r *http.Request, path string) {
+	pagename, redir := canonicalize(path)
 	if redir {
-		http.Redirect(w, r, "/app/page/"+pagename, 302)
+		http.Redirect(w, r, config.BasePath+pagename, 302)
 		return
 	}
 
@@ -206,10 +223,10 @@ func pageHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Nothing to see here...\n")
 }
 
-func fileHandler(w http.ResponseWriter, r *http.Request) {
-	pagename, redir := canonicalize(r.URL.Path[10:])
+func fileHandler(w http.ResponseWriter, r *http.Request, path string) {
+	pagename, redir := canonicalize(path)
 	if redir {
-		http.Redirect(w, r, "/app/file/"+pagename, 302)
+		http.Redirect(w, r, config.BasePath+"@raw/"+pagename, 302)
 		return
 	}
 
@@ -224,16 +241,37 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		"&response_type=code", 302)
 }
 
-type ServerConfig struct {
-	Address string `address`
-	Socket  string `fcgi-socket`
-	BaseDir string `datastore`
-	DataDir string
-	UserDir string
-	FileDir string
-}
+func rootHandler(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
 
-var config ServerConfig
+	if !strings.HasPrefix(path, config.BasePath) {
+		errorHandler(w, r, "base path mismatch")
+		return
+	}
+
+	path = path[len(config.BasePath):]
+	if strings.HasPrefix(path, "@") {
+		switch path {
+		case "@auth":
+			authHandler(w, r)
+		case "@login":
+			loginHandler(w, r)
+		case "@logout":
+			logoutHandler(w, r)
+		case "@check":
+			checkHandler(w, r)
+		case "@raw/":
+			fileHandler(w, r, path[5:])
+		case "@test":
+			misc.DebugHttpHandler(w, r)
+		default:
+			errorHandler(w, r, "unsupported action")
+		}
+		return
+	}
+
+	pageHandler(w, r, path)
+}
 
 func main() {
 	var cfg misc.Configuration
@@ -275,15 +313,6 @@ func main() {
 			" and server.socket", cfgfile)
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/app/test", misc.DebugHttpHandler)
-	mux.HandleFunc("/app/auth", authHandler)
-	mux.HandleFunc("/app/login", loginHandler)
-	mux.HandleFunc("/app/logout", logoutHandler)
-	mux.HandleFunc("/app/check", checkHandler)
-	mux.HandleFunc("/app/page/", pageHandler)
-	mux.HandleFunc("/app/file/", fileHandler)
-
 	if len(sock) != 0 {
 		os.Remove(sock)
 		s, err := net.Listen("unix", sock)
@@ -292,11 +321,11 @@ func main() {
 			log.Fatal(err)
 		}
 
-		err = fcgi.Serve(s, mux)
+		err = fcgi.Serve(s, http.HandlerFunc(rootHandler))
 		if err != nil {
 			log.Fatal(err)
 		}
 	} else {
-		http.ListenAndServe(addr, mux)
+		http.ListenAndServe(addr, http.HandlerFunc(rootHandler))
 	}
 }
